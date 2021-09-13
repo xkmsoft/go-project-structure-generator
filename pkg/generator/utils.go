@@ -1,11 +1,14 @@
 package generator
 
 import (
+	"bufio"
 	"fmt"
 	"go/build"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 	"io"
+	"io/ioutil"
 	"os"
-	"path/filepath"
 )
 
 // CopyFile copies the file from the src into des.
@@ -44,6 +47,32 @@ func CopyFile(src string, dest string) (int64, error) {
 	return n, err
 }
 
+// CreateFile simply creates file from given filename and content. It returns the number of bytes written and error
+func CreateFile(fileName string, content string) (int, error) {
+	f, err := os.Create(fileName)
+	if err != nil {
+		return 0, err
+	}
+	defer func(f *os.File) {
+		if err := f.Close(); err != nil {
+			fmt.Printf("Error closing file: %s\n", err)
+		}
+	}(f)
+
+	writer := bufio.NewWriter(f)
+	n, err := writer.Write([]byte(content))
+	if err != nil {
+		return 0, err
+	}
+
+	err = writer.Flush()
+	if err != nil {
+		return 0, err
+	}
+
+	return n, nil
+}
+
 // GetGOPATH returns the GOPATH environment variable
 func GetGOPATH() string {
 	gopath := os.Getenv("GOPATH")
@@ -61,11 +90,34 @@ func IsDirExists(path string) bool {
 	return true
 }
 
-// GetAssetDirectory returns the asset directory of the project or a non-nil error if anything goes wrong.
-func GetAssetDirectory() (string, error) {
-	current, err := os.Getwd()
+// GetGoModule reads and parses the go.mod file and returns the go module path and its version if the
+// desired module name is found in the file
+func GetGoModule(modulePath string) (*module.Version, error) {
+	bytes, err := ioutil.ReadFile("go.mod")
+	if err != nil {
+		return nil, err
+	}
+	mod, err := modfile.Parse("go.mod", bytes, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, requirement := range mod.Require {
+		if requirement.Mod.Path == modulePath && !requirement.Indirect {
+			return &requirement.Mod, nil
+		}
+	}
+	return nil, fmt.Errorf("requirement %s could not be found in go.mod", modulePath)
+}
+
+// GetCurrentModulePath returns the current project's module path
+func GetCurrentModulePath() (string, error) {
+	bytes, err := ioutil.ReadFile("go.mod")
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(current, AssetsDirectory), nil
+	mod, err := modfile.Parse("go.mod", bytes, nil)
+	if err != nil {
+		return "", err
+	}
+	return mod.Module.Mod.Path, nil
 }
